@@ -1,65 +1,58 @@
-import os
-from time import sleep
-from getpass import getpass
-from app.utils.const import PATH
+from app.utils.const import PATH, USERS, URL, USERNAME, PASSWORD, PHONE, ALL_DONE, SECOND_PAGE
 from app.services.webdriver import Webdriver
-from app.utils.colors import RED, RESET
-from app.services.processes.login import Login
-from pdb import set_trace
-from app.utils.const import FIRST_PAGE, ENTER, SECOND_PAGE, URL, USERNAME, PASSWORD, ALL_DONE
-from app.utils.colors import YELLOW
+from app.utils.colors import RED, RESET, YELLOW
+from app.services.processes.Login import Login
 from app.utils.func import cls
 from app.services.processes.TwitterSearcher import Searcher
+from app.services.processes.Dataset import Dataset
+from app.services.processes.Json import combine_json_files
 
-def login(browser: int, browser_path: str) -> Webdriver:
-    """Login to a specific website."""
+def start_webdriver(browser: int) -> Webdriver:
+    """Start a webdriver and login to the site with retries."""
     while True:
-        web = None  # Prevent Exception.
-        try:  # Try to start a webdriver.
-            web = Webdriver(browser, browser_path)
-            
-        except Exception as error:
-            print(f'{RED}Something went wrong with your webdriver.\n{error}{RESET}')
-            
-        try:  # Try to login to a wallet and OpenSea.
-            if Login(web, URL, USERNAME, PASSWORD).login():
-                return web  # Stop the while loop.
-            
-        except Exception:  # Stop the browser.
-            web.quit() if web is not None else None
-            
-def user(PATH : str):
-    current_directory = os.path.dirname(os.path.realpath(__file__))
-    driver_path = os.path.join(current_directory, PATH)
-    return driver_path
-            
-if __name__ == "__main__":
+        web = None
+        try:
+            web = Webdriver(browser)
+        except Exception as e:
+            print(f"{RED}Webdriver error: {e}{RESET}")
+            continue
+
+        try:
+            login_process = Login(web, URL, USERNAME, PASSWORD, PHONE)
+            if login_process.login():
+                return web
+        except Exception:
+            if web is not None:
+                web.quit()
+
+def main():
     try:
-        #chdir(dirname(abspath(__file__)))  # Move to the actual path.
-        cls()  # Clear console.
-        #print(FIRST_PAGE)  # License, author and version.
-        #input(ENTER)  # Press enter to continue.
-        cls()  # Clear console.
-        #print(SECOND_PAGE)  # License and author.
-        driver_path = user(PATH)
-        # print(driver_path)
-        # webdriver_instance = Webdriver(browser = 2, browser_path = driver_path)
-        cls()  # Clear console.
-        while True:  # It does several processes every 12 hours.
-            web = login(0, driver_path)  # Start the process.
-            if web != None:  # This is the end of the process.
-                break  # Stop everything.
+        cls()
+        print(SECOND_PAGE)
+
+        # Start webdriver and login
+        web = start_webdriver(0)  # 0=Chrome, 1=Firefox
+
+        for user in USERS:
+            searcher = Searcher(web)
+            searcher.search(user)
+            searcher.collect_tweets()
+
+        web.quit()
+
+        # Combine JSONs and create dataset
+        print(f'{YELLOW}\nCombining JSON files and creating dataset...\n{RESET}')
         
-        search_item = "@JackySkaff"
-        searcher = Searcher(web)
-        searcher.search(search_item)
-        searcher.scroll()
-        
-        print(f'{YELLOW}\nRestarting the webdriver.\n{RESET}')
-        print(ALL_DONE)  # Script stops, all done.
-            
+        json_file = combine_json_files()
+        dataset = Dataset(json_file)
+        dataset.createDataset()
+
+        print(ALL_DONE)
+
     except KeyboardInterrupt:
-        print(f'\n\n{YELLOW}The program has been stopped by the user.{RESET}')
-        
+        print(f'\n\n{YELLOW}Program stopped by user.{RESET}')
     except Exception as error:
         print(f'{RED}Something went wrong.{RESET}\n{error}')
+
+# if __name__ == "__main__":
+#     main()
