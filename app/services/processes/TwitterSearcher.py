@@ -1,55 +1,71 @@
 from app.services.webdriver import Webdriver
 from selenium.webdriver.common.keys import Keys
-from selenium.common.exceptions import StaleElementReferenceException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait as WDW
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 from time import sleep
+from .Tweets import Tweet
+from .Json import Json
 
 class Searcher:
-    def __init__(self, web : Webdriver):
+    def __init__(self, web: Webdriver):
         self.web: Webdriver = web
-        self.all_tweets = {}
-        
-    def search(self, search: str) -> bool:
-        try:  # Try until it works for 20 seconds.
-            self.web.send_keys("//input[@data-testid='SearchBox_Search_Input']", search + Keys.ENTER)
-            self.web.clickable('//*[@id="react-root"]/div/div/div[2]/main/div/div/div/div/div/div[3]/section/div/div/div[3]/div/div/div/div/div[2]/div/div[1]/div/div[1]/a')
-            
-        except Exception as ex:
-            print(ex)
-        
-    def tweets(self):
-        #scroll with javascript
-        self.web.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);") 
-        tweets_divs = self.web.find_css("div.css-1rynq56.r-8akbws.r-krxsd3.r-dnmrzs.r-1udh08x.r-bcqeeo.r-qvutc0.r-1qd0xha.r-a023e6.r-rjixqe.r-16dba41.r-bnwqim")
-        # username_divs = self.web.find_css("div.css-175oi2r.r-1iusvr4.r-16y2uox.r-1777fci.r-kzbkwu")
-        posts = {}
-        try:
-            for div in tweets_divs:
-                if len(div.text.strip()) != 0 and div.text.strip() not in posts.values():
-                    posts[tweets_divs.index(div)] = div.text.strip()
+        self.all_tweets = []
 
-            return posts
-        
-        except StaleElementReferenceException as ex:
-            return self.tweets()
-                
-    def scroll(self):
-        list_posts = []
-        # Scroll down to the bottom of the page
-        total_height = self.web.driver.execute_script("return document.body.scrollHeight")
-        scroll_speed = 10
-        
-        j = 0
-        for i in range(0, total_height, scroll_speed):
-            posts = self.tweets()
-            self.web.driver.execute_script(f"window.scrollTo(0, {i});")
-            print(posts)
-            # if len(posts.values()) != 0:
-            #     posts = list(posts.values())
-            #     for post in posts:
-            #         list_posts.append(post)
-            #         self.all_tweets[str(j)] = post
-            #         j += 1
-      
-            sleep(0.1)  # Adjust the sleep time between scrolls if needed
-            
-        print(self.all_tweets)
+    def search(self, query: str) -> bool:
+        """Search for a query in Twitter/X."""
+        try:
+            # Wait for the search input to appear
+            search_input = WDW(self.web.driver, 10).until(
+                EC.visibility_of_element_located((By.XPATH, "//input[@data-testid='SearchBox_Search_Input']"))
+            )
+
+            search_input.clear()
+            search_input.send_keys(query + Keys.ENTER)
+            sleep(2)  # Wait for results to load
+            return True
+
+        except TimeoutException:
+            print(f"Search input not found for query: {query}")
+            return False
+
+    def scroll_step_by_step(self, scroll_increment=500, wait_time=1):
+        """Scrolls the page step by step to load more tweets."""
+        last_height = self.web.driver.execute_script("return document.body.scrollHeight")
+        while True:
+            self.web.driver.execute_script(f"window.scrollBy(0, {scroll_increment});")
+            sleep(wait_time)
+            new_height = self.web.driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                break
+            last_height = new_height
+
+    def collect_tweets(self):
+        """Collect visible tweets and store them in JSON."""
+        self.scroll_step_by_step()
+        tweets = self.web.find_elements('//article[@data-testid="tweet"]')
+
+        for tweet in tweets:
+            try:
+                data = tweet.text.split("\n")
+                if len(data) < 6:
+                    continue  # Skip incomplete tweets
+
+                # Extract numbers/likes/retweets
+                stats = []
+                for item in data[6:]:
+                    if item.replace('.', '').replace('K', '').isdigit():
+                        stats.append(item)
+
+                json_tweet = Tweet(data[1], data[2], data[4], data[5])
+                json_data = json_tweet.createData()
+                json_handler = Json(json_data)
+                json_handler.createJson()
+                self.all_tweets.append(json_data)
+
+            except Exception as e:
+                print(f"Failed to parse tweet: {e}")
+
+        # Scroll to bottom to ensure full page load
+        self.web.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
